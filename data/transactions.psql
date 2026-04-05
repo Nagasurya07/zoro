@@ -1,0 +1,138 @@
+-- Shared transaction sheet for all authenticated users
+create extension if not exists pgcrypto;
+
+create table if not exists public.transaction_sheet (
+  id uuid primary key default gen_random_uuid(),
+  amount numeric(12,2) not null,
+  type text not null check (type in ('income', 'expense')),
+  category text not null,
+  transaction_date timestamptz not null,
+  notes text,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+-- Add deleted_at column if it doesn't exist (for existing tables)
+alter table public.transaction_sheet add column if not exists deleted_at timestamptz;
+
+create unique index if not exists ux_transaction_sheet_demo_rows
+on public.transaction_sheet (amount, type, category, transaction_date, notes);
+
+alter table public.transaction_sheet enable row level security;
+
+grant usage on schema public to authenticated;
+grant select on table public.transaction_sheet to authenticated;
+grant insert on table public.transaction_sheet to authenticated;
+grant update on table public.transaction_sheet to authenticated;
+
+create or replace function public.get_transaction_sheet_limited(p_limit integer default 100)
+returns table (
+  id uuid,
+  amount numeric,
+  type text,
+  category text,
+  transaction_date timestamptz,
+  notes text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    t.id,
+    t.amount,
+    t.type,
+    t.category,
+    t.transaction_date,
+    t.notes
+  from public.transaction_sheet t
+  where t.deleted_at is null
+  order by t.transaction_date desc
+  limit greatest(1, least(coalesce(p_limit, 100), 200));
+$$;
+
+grant execute on function public.get_transaction_sheet_limited(integer) to authenticated;
+
+drop policy if exists "authenticated_read_all_transactions" on public.transaction_sheet;
+create policy "authenticated_read_all_transactions"
+on public.transaction_sheet
+for select
+to authenticated
+using (deleted_at is null);
+
+drop policy if exists "authenticated_insert_transactions" on public.transaction_sheet;
+create policy "authenticated_insert_transactions"
+on public.transaction_sheet
+for insert
+to authenticated
+with check (true);
+
+drop policy if exists "authenticated_update_transactions" on public.transaction_sheet;
+create policy "authenticated_update_transactions"
+on public.transaction_sheet
+for update
+to authenticated
+using (deleted_at is null)
+with check (true);
+
+insert into public.transaction_sheet (amount, type, category, transaction_date, notes)
+select
+  case
+    when gs.i % 3 = 0 then round((700 + (gs.i * 17.35))::numeric, 2)
+    else round((15 + (gs.i * 4.25))::numeric, 2)
+  end as amount,
+  case
+    when gs.i % 3 = 0 then 'income'
+    else 'expense'
+  end as type,
+  case
+    when gs.i % 6 = 0 then 'Freelance'
+    when gs.i % 6 = 1 then 'Groceries'
+    when gs.i % 6 = 2 then 'Transportation'
+    when gs.i % 6 = 3 then 'Education'
+    when gs.i % 6 = 4 then 'Food & Beverage'
+    else 'Utilities'
+  end as category,
+  date_trunc('day', now()) - make_interval(days => (200 - gs.i), mins => (gs.i * 13) % 720) as transaction_date,
+  case
+    when gs.i % 3 = 0 then format('Client payment batch #%s', gs.i)
+    when gs.i % 6 = 1 then format('Grocery purchase #%s', gs.i)
+    when gs.i % 6 = 2 then format('Transport expense #%s', gs.i)
+    when gs.i % 6 = 3 then format('Learning expense #%s', gs.i)
+    when gs.i % 6 = 4 then format('Cafe/meal expense #%s', gs.i)
+    else format('Utility bill entry #%s', gs.i)
+  end as notes
+from generate_series(1, 200) as gs(i)
+on conflict (amount, type, category, transaction_date, notes) do nothing;
+
+-- Create notifications table for admin actions
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  type text not null check (type in ('transaction_added', 'transaction_deleted', 'bulk_delete')),
+  message text not null,
+  admin_email text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.notifications enable row level security;
+
+grant usage on schema public to authenticated;
+grant select, insert on table public.notifications to authenticated;
+
+-- Allow all authenticated users to read notifications
+drop policy if exists "authenticated_read_notifications" on public.notifications;
+create policy "authenticated_read_notifications"
+on public.notifications
+for select
+to authenticated
+using (true);
+
+-- Allow authenticated users to insert notifications (for admin actions)
+drop policy if exists "authenticated_insert_notifications" on public.notifications;
+create policy "authenticated_insert_notifications"
+on public.notifications
+for insert
+to authenticated
+with check (true);
+
+notify pgrst, 'reload schema';
