@@ -21,13 +21,7 @@ const manageItems = [
     href: "/dashboard/analyst",
     roles: ["analyst", "admin"],
   },
-  { label: "Performance", href: "/dashboard", roles: ["analyst", "admin"] },
-  {
-    label: "Notifications",
-    href: "/dashboard",
-    roles: ["viewer", "analyst", "admin"],
-  },
-  { label: "Settings", href: "/dashboard", roles: ["admin"] },
+  
 ];
 
 const preferenceItems = [
