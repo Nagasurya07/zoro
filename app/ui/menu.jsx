@@ -21,11 +21,16 @@ const manageItems = [
     href: "/dashboard/analyst",
     roles: ["analyst", "admin"],
   },
+  {
+    label: "About",
+    href: "/about",
+    roles: ["viewer", "analyst", "admin"],
+  },
   
 ];
 
 const preferenceItems = [
-  { label: "Security", href: "/dashboard", roles: ["analyst", "admin"] },
+  
 ];
 
 function SquareIcon({ active = false }) {
